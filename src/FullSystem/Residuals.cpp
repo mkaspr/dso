@@ -110,14 +110,24 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     centerProjectedTo = Vec3f(Ku, Kv, new_idepth);
 
 
-    // diff d_idepth
+    // compute derivatives for keypoint depth
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this is where my new cost function derivatives would be added
+    // #######################################################################
+    // #######################################################################
+
     d_d_x = drescale * (PRE_tTll_0[0]-PRE_tTll_0[2]*u)*SCALE_IDEPTH*HCalib->fxl();
     d_d_y = drescale * (PRE_tTll_0[1]-PRE_tTll_0[2]*v)*SCALE_IDEPTH*HCalib->fyl();
 
 
+    // derivatives for the camera calibration (shouldn't change)
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: determine if we can fix, otherwise, this does affect my change
+    // #######################################################################
+    // #######################################################################
 
-
-    // diff calib
     d_C_x[2] = drescale*(PRE_RTll_0(2,0)*u-PRE_RTll_0(0,0));
     d_C_x[3] = HCalib->fxl() * drescale*(PRE_RTll_0(2,1)*u-PRE_RTll_0(0,1)) * HCalib->fyli();
     d_C_x[0] = KliP[0]*d_C_x[2];
@@ -139,6 +149,13 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     d_C_y[3] = (d_C_y[3]+1)*SCALE_C;
 
 
+    // compute derivatives for the camera pose
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this is where my new cost function derivatives would be added
+    // #######################################################################
+    // #######################################################################
+
     d_xi_x[0] = new_idepth*HCalib->fxl();
     d_xi_x[1] = 0;
     d_xi_x[2] = -new_idepth*u*HCalib->fxl();
@@ -155,6 +172,7 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
   }
 
 
+  // compose Jacobian matrix from partial derivatives
   {
     J->Jpdxi[0] = d_xi_x;
     J->Jpdxi[1] = d_xi_y;
@@ -164,12 +182,7 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 
     J->Jpdd[0] = d_d_x;
     J->Jpdd[1] = d_d_y;
-
   }
-
-
-
-
 
 
   float JIdxJIdx_00=0, JIdxJIdx_11=0, JIdxJIdx_10=0;
@@ -181,15 +194,35 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
   for(int idx=0;idx<patternNum;idx++)
   {
     float Ku, Kv;
-    if(!projectPoint(point->u+patternP[idx][0], point->v+patternP[idx][1], point->idepth_scaled, PRE_KRKiTll, PRE_KtTll, Ku, Kv))
-      { state_NewState = ResState::OOB; return state_energy; }
+
+    // I already have point->idepth_scaled
+    // TODO: what is "scaled" mean here?
+    // ALSO: I could call other function or update this one
+    // but I need to get the new depth out
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this is where my new cost function would be added
+    // #######################################################################
+    // #######################################################################
+    if (!projectPoint(point->u+patternP[idx][0], point->v+patternP[idx][1],
+          point->idepth_scaled, PRE_KRKiTll, PRE_KtTll, Ku, Kv))
+    {
+      state_NewState = ResState::OOB;
+      return state_energy;
+    }
 
     projectedTo[idx][0] = Ku;
     projectedTo[idx][1] = Kv;
 
+    // sample intensity and 2D derivatives for given coordinate
+    Vec3f hitColor = (getInterpolatedElement33(dIl, Ku, Kv, wG[0]));
 
-        Vec3f hitColor = (getInterpolatedElement33(dIl, Ku, Kv, wG[0]));
-        float residual = hitColor[0] - (float)(affLL[0] * color[idx] + affLL[1]);
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this is where my new cost function would be added
+    // #######################################################################
+    // #######################################################################
+    float residual = hitColor[0] - (float)(affLL[0] * color[idx] + affLL[1]);
 
 
 
@@ -198,12 +231,28 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     { state_NewState = ResState::OOB; return state_energy; }
 
 
-    float w = sqrtf(setting_outlierTHSumComponent / (setting_outlierTHSumComponent + hitColor.tail<2>().squaredNorm()));
-        w = 0.5f*(w + weights[idx]);
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this is where my new weight function would be added
+    // #######################################################################
+    // #######################################################################
+    float w = sqrtf(setting_outlierTHSumComponent /
+        (setting_outlierTHSumComponent + hitColor.tail<2>().squaredNorm()));
 
+    // average weight with main keyframe weight
+    // #######################################################################
+    // #######################################################################
+    // MIKEK: this main keyframe weight should also be updated
+    // #######################################################################
+    // #######################################################################
+    w = 0.5f*(w + weights[idx]);
 
+    // compute huber norm weighting
+    float hw = fabsf(residual) < setting_huberTH ?
+        1 : setting_huberTH / fabsf(residual);
 
-    float hw = fabsf(residual) < setting_huberTH ? 1 : setting_huberTH / fabsf(residual);
+    // compute final residual and add to current total
+    // will be summed over all pixels in keypoint patch
     energyLeft += w*w*hw *residual*residual*(2-hw);
 
     {

@@ -49,7 +49,9 @@ namespace dso
 
 
 
-void FullSystem::linearizeAll_Reductor(bool fixLinearization, std::vector<PointFrameResidual*>* toRemove, int min, int max, Vec10* stats, int tid)
+void FullSystem::linearizeAll_Reductor(bool fixLinearization,
+    std::vector<PointFrameResidual*>* toRemove, int min, int max, Vec10* stats,
+    int tid)
 {
   for(int k=min;k<max;k++)
   {
@@ -133,15 +135,6 @@ void FullSystem::setNewFrameEnergyTH()
   newFrame->frameEnergyTH = 26.0f*setting_frameEnergyTHConstWeight + newFrame->frameEnergyTH*(1-setting_frameEnergyTHConstWeight);
   newFrame->frameEnergyTH = newFrame->frameEnergyTH*newFrame->frameEnergyTH;
   newFrame->frameEnergyTH *= setting_overallEnergyTHWeight*setting_overallEnergyTHWeight;
-
-
-
-//
-//	int good=0,bad=0;
-//	for(float f : allResVec) if(f<newFrame->frameEnergyTH) good++; else bad++;
-//	printf("EnergyTH: mean %f, median %f, result %f (in %d, out %d)! \n",
-//			meanElement, nthElement, sqrtf(newFrame->frameEnergyTH),
-//			good, bad);
 }
 
 Vec3 FullSystem::linearizeAll(bool fixLinearization)
@@ -384,7 +377,11 @@ void FullSystem::loadSateBackup()
 
 double FullSystem::calcMEnergy()
 {
+  // if forced to accept step, return zero error
+  // this way it cannot be any worse
   if(setting_forceAceptStep) return 0;
+
+  // otherwise, return the actual error
   return ef->calcMEnergyF();
 
 }
@@ -459,17 +456,17 @@ float FullSystem::optimize(int mnumOptIts)
         ef->nPoints,(int)activeResiduals.size(), numLRes);
   }
 
-  // =====================================
-  // TODO: review ========================
-  // =====================================
-
+  // ASSUME: this is recomputing new derivatives
+  // that way the following two functions can just do Ax - b
+  // to get the current error, without approximating anything
+  // these Jacobians/Hessian can also be used later
   Vec3 lastEnergy = linearizeAll(false);
-  double lastEnergyL = calcLEnergy();
-  double lastEnergyM = calcMEnergy();
 
-  // =====================================
-  // =====================================
-  // =====================================
+  // ASSUME: this is the photometric error data term
+  double lastEnergyL = calcLEnergy();
+
+  // ASSUME: this is the regularization cost on brightness change
+  double lastEnergyM = calcMEnergy();
 
   // check if multi-threading
   if(multiThreading)
@@ -694,6 +691,8 @@ void FullSystem::solveSystem(int iteration, double lambda)
 
 double FullSystem::calcLEnergy()
 {
+  // if we are forced to always access an optimization step
+  // then teturn zero, soi no other work is really needed
   if(setting_forceAceptStep) return 0;
 
   double Ef = ef->calcLEnergyF_MT();

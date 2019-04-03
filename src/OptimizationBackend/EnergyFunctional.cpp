@@ -349,36 +349,48 @@ void EnergyFunctional::resubstituteFPt(
 
 double EnergyFunctional::calcMEnergyF()
 {
-
+  // assert valid state for doing computation
   assert(EFDeltaValid);
   assert(EFAdjointsValid);
   assert(EFIndicesValid);
 
+  // get tightly packed parameter vector
   VecX delta = getStitchedDeltaF();
+
+  // not sure why the dot-product
   return delta.dot(2*bM + HM*delta);
 }
 
 
+// NOTE: should not need to update this function as it is using the
+// previously computed Jacobians, linearized at the current parameter state
+// so this code is agnostic to the objective function at hand
 void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
 {
-
+  // initialize accumlator
+  // assuming this is for the total sum reduction
   Accumulator11 E;
   E.initialize();
+
   VecCf dc = cDeltaF;
 
+  // process all keypoints within given range
   for(int i=min;i<max;i++)
   {
+    // get keypoint
     EFPoint* p = allPoints[i];
+
     float dd = p->deltaF;
 
+    // for each observation of keypoint
     for(EFResidual* r : p->residualsAll)
     {
+      // skip non-linearized and inactive voice
       if(!r->isLinearized || !r->isActive()) continue;
 
       Mat18f dp = adHTdeltaF[r->hostIDX+nFrames*r->targetIDX];
+
       RawResidualJacobian* rJ = r->J;
-
-
 
       // compute Jp*delta
       float Jp_delta_x_1 =  rJ->Jpdxi[0].dot(dp.head<6>())
@@ -394,6 +406,7 @@ void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
       __m128 delta_a = _mm_set1_ps((float)(dp[6]));
       __m128 delta_b = _mm_set1_ps((float)(dp[7]));
 
+      // process each pixel in keypoint patch
       for(int i=0;i+3<patternNum;i+=4)
       {
         // PATTERN: E = (2*res_toZeroF + J*delta) * J*delta.
@@ -426,19 +439,30 @@ void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
 
 double EnergyFunctional::calcLEnergyF_MT()
 {
+  // assert state is valid for optimization
   assert(EFDeltaValid);
   assert(EFAdjointsValid);
   assert(EFIndicesValid);
 
+  // initialize total error as zero
   double E = 0;
+
+  // process each keyframe in window
   for(EFFrame* f : frames)
-        E += f->delta_prior.cwiseProduct(f->prior).dot(f->delta_prior);
+  {
+    // NOTE: not sure what this is
+    // but I assume it has more to do with the optimization strategy
+    // and not so much with the objective function itself
+    E += f->delta_prior.cwiseProduct(f->prior).dot(f->delta_prior);
+  }
 
   E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
 
+  // add the photometric error for each keypoint patch
   red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
       this, _1, _2, _3, _4), 0, allPoints.size(), 50);
 
+  // return the total error
   return E+red->stats[0];
 }
 
@@ -982,10 +1006,80 @@ void EnergyFunctional::makeIDX()
 
 VecX EnergyFunctional::getStitchedDeltaF() const
 {
-  VecX d = VecX(CPARS+nFrames*8); d.head<CPARS>() = cDeltaF.cast<double>();
-  for(int h=0;h<nFrames;h++) d.segment<8>(CPARS+8*h) = frames[h]->delta;
+  // allocate parameter vector
+  VecX d = VecX(CPARS+nFrames*8);
+
+  // store camera parameters
+  d.head<CPARS>() = cDeltaF.cast<double>();
+
+  // process each keyframe in window
+  for(int h=0;h<nFrames;h++)
+  {
+    // store keyframe parameters
+    d.segment<8>(CPARS+8*h) = frames[h]->delta;
+  }
+
   return d;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
