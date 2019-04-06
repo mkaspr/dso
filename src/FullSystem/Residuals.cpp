@@ -72,68 +72,96 @@ PointFrameResidual::PointFrameResidual(PointHessian* point_, FrameHessian* host_
   isNew=true;
 }
 
-// TODO: review this, it may have hard-coded derivatives for the cost function
+//########################################################################
+//########################################################################
+// MIKEK: this is where all of my light-aware changes need to be made
+//########################################################################
+//########################################################################
 double PointFrameResidual::linearize(CalibHessian* HCalib)
 {
+  // initialize new cost as invalid value
   state_NewEnergyWithOutlier=-1;
 
-  if(state_state == ResState::OOB)
-    { state_NewState = ResState::OOB; return state_energy; }
+  // check if current residual state is "out-of-bounds"
+  if (state_state == ResState::OOB)
+  {
+    // assign out-of-bounds to new state as well
+    state_NewState = ResState::OOB;
 
+    // return current energy
+    return state_energy;
+  }
+
+  // get reference to precalculated values for frame-frame pair
   FrameFramePrecalc* precalc = &(host->targetPrecalc[target->idx]);
+
+  // initialize total cost for keypoint patch
   float energyLeft=0;
+
+  // fetch precalculated values for frame-frame observation
+  // TODO: denote what each of these represents
   const Eigen::Vector3f* dIl = target->dI;
-  //const float* const Il = target->I;
   const Mat33f &PRE_KRKiTll = precalc->PRE_KRKiTll;
   const Vec3f &PRE_KtTll = precalc->PRE_KtTll;
   const Mat33f &PRE_RTll_0 = precalc->PRE_RTll_0;
   const Vec3f &PRE_tTll_0 = precalc->PRE_tTll_0;
-  const float * const color = point->color;
-  const float * const weights = point->weights;
-
+  const float* const color = point->color;
+  const float* const weights = point->weights;
   Vec2f affLL = precalc->PRE_aff_mode;
   float b0 = precalc->PRE_b0_mode;
 
-
+  // allocate partial derivatives
   Vec6f d_xi_x, d_xi_y;
   Vec4f d_C_x, d_C_y;
   float d_d_x, d_d_y;
+
   {
+    // declare output parameters populated by projection function
     float drescale, u, v, new_idepth;
     float Ku, Kv;
     Vec3f KliP;
 
+    // check if keypoint does notsuccessfully projections into reference frame
+    // NOTE: this has the side of affect of computing Ku, Kv, and new_idepth
+    // TODO: what is "zero-scaled" mean here?
     if(!projectPoint(point->u, point->v, point->idepth_zero_scaled, 0, 0,HCalib,
         PRE_RTll_0,PRE_tTll_0, drescale, u, v, Ku, Kv, KliP, new_idepth))
-      { state_NewState = ResState::OOB; return state_energy; }
+    {
+      // set new state to out-of-bounds
+      state_NewState = ResState::OOB;
 
+      // return current energy
+      return state_energy;
+    }
+
+    // get center-point and depth of keypoint in new reference frame
     centerProjectedTo = Vec3f(Ku, Kv, new_idepth);
 
-
+    //=======================================
     // compute derivatives for keypoint depth
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this is where my new cost function derivatives would be added
-    // #######################################################################
-    // #######################################################################
+    //=======================================
 
-    d_d_x = drescale * (PRE_tTll_0[0]-PRE_tTll_0[2]*u)*SCALE_IDEPTH*HCalib->fxl();
-    d_d_y = drescale * (PRE_tTll_0[1]-PRE_tTll_0[2]*v)*SCALE_IDEPTH*HCalib->fyl();
+    d_d_x = drescale * (PRE_tTll_0[0]-PRE_tTll_0[2]*u)*
+        SCALE_IDEPTH*HCalib->fxl();
 
+    d_d_y = drescale * (PRE_tTll_0[1]-PRE_tTll_0[2]*v)*
+        SCALE_IDEPTH*HCalib->fyl();
 
-    // derivatives for the camera calibration (shouldn't change)
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: determine if we can fix, otherwise, this does affect my change
-    // #######################################################################
-    // #######################################################################
+    //=======================================
+    // derivatives for the camera calibration
+    //=======================================
 
     d_C_x[2] = drescale*(PRE_RTll_0(2,0)*u-PRE_RTll_0(0,0));
-    d_C_x[3] = HCalib->fxl() * drescale*(PRE_RTll_0(2,1)*u-PRE_RTll_0(0,1)) * HCalib->fyli();
+
+    d_C_x[3] = HCalib->fxl() * drescale*(PRE_RTll_0(2,1)*u-PRE_RTll_0(0,1)) *
+        HCalib->fyli();
+
     d_C_x[0] = KliP[0]*d_C_x[2];
     d_C_x[1] = KliP[1]*d_C_x[3];
 
-    d_C_y[2] = HCalib->fyl() * drescale*(PRE_RTll_0(2,0)*v-PRE_RTll_0(1,0)) * HCalib->fxli();
+    d_C_y[2] = HCalib->fyl() * drescale*(PRE_RTll_0(2,0)*v-PRE_RTll_0(1,0)) *
+        HCalib->fxli();
+
     d_C_y[3] = drescale*(PRE_RTll_0(2,1)*v-PRE_RTll_0(1,1));
     d_C_y[0] = KliP[0]*d_C_y[2];
     d_C_y[1] = KliP[1]*d_C_y[3];
@@ -148,13 +176,9 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     d_C_y[2] *= SCALE_C;
     d_C_y[3] = (d_C_y[3]+1)*SCALE_C;
 
-
+    //========================================
     // compute derivatives for the camera pose
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this is where my new cost function derivatives would be added
-    // #######################################################################
-    // #######################################################################
+    //========================================
 
     d_xi_x[0] = new_idepth*HCalib->fxl();
     d_xi_x[1] = 0;
@@ -171,81 +195,89 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     d_xi_y[5] = u*HCalib->fyl();
   }
 
-
   // compose Jacobian matrix from partial derivatives
+  // NOTE: two values as chain-rule ends with 2D image gradient
   {
+    // update with pose derivatives
     J->Jpdxi[0] = d_xi_x;
     J->Jpdxi[1] = d_xi_y;
 
+    // update with camera derivatives
     J->Jpdc[0] = d_C_x;
     J->Jpdc[1] = d_C_y;
 
+    // update with depth derivatives
     J->Jpdd[0] = d_d_x;
     J->Jpdd[1] = d_d_y;
   }
 
-
+  // allocate scalars for Jacobian-based calculations
   float JIdxJIdx_00=0, JIdxJIdx_11=0, JIdxJIdx_10=0;
   float JabJIdx_00=0, JabJIdx_01=0, JabJIdx_10=0, JabJIdx_11=0;
   float JabJab_00=0, JabJab_01=0, JabJab_11=0;
-
   float wJI2_sum = 0;
 
+  // for each pixel in keypoint pixel-patch
   for(int idx=0;idx<patternNum;idx++)
   {
+    // allocate projection coords for current pixel in patch
     float Ku, Kv;
 
-    // I already have point->idepth_scaled
-    // TODO: what is "scaled" mean here?
-    // ALSO: I could call other function or update this one
-    // but I need to get the new depth out
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this is where my new cost function would be added
-    // #######################################################################
-    // #######################################################################
+    // check if pixel in patch does not project into current image
+    // NOTE: this has the side affect of computing Ku and Kv coordinates
+    // TODO: what is "scaled" mean here and why different from above?
     if (!projectPoint(point->u+patternP[idx][0], point->v+patternP[idx][1],
           point->idepth_scaled, PRE_KRKiTll, PRE_KtTll, Ku, Kv))
     {
+      // set state to "out-of-bounds"
       state_NewState = ResState::OOB;
+
+      // return current energy
       return state_energy;
     }
 
+    // record screen coords of pixel in reference image
     projectedTo[idx][0] = Ku;
     projectedTo[idx][1] = Kv;
 
     // sample intensity and 2D derivatives for given coordinate
     Vec3f hitColor = (getInterpolatedElement33(dIl, Ku, Kv, wG[0]));
 
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this is where my new cost function would be added
-    // #######################################################################
-    // #######################################################################
+    //=======================================================================
+    // finally, compute photometric error (TODO: update with light-aware cost)
+    //=======================================================================
     float residual = hitColor[0] - (float)(affLL[0] * color[idx] + affLL[1]);
 
-
-
+    //========================================================================
+    // compute partial-derivative of photometric error w.r.t. affine-scale (a)
+    // TODO: what about affine-bias (b)?
+    //========================================================================
     float drdA = (color[idx]-b0);
-    if(!std::isfinite((float)hitColor[0]))
-    { state_NewState = ResState::OOB; return state_energy; }
 
+    // check if hitColor is invalid (ASSUME: over-/under-saturated)
+    if (!std::isfinite((float)hitColor[0]))
+    {
+      // set state to "out-of-bounds"
+      state_NewState = ResState::OOB;
 
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this is where my new weight function would be added
-    // #######################################################################
-    // #######################################################################
+      // return current energy
+      return state_energy;
+    }
+
+    //=============================================================
+    // compute residual weight based on magnitude of image gradient
+    // w = sqrt(c / (c + norm(dI))
+    // TODO: update with my own weighting function
+    //=============================================================
     float w = sqrtf(setting_outlierTHSumComponent /
         (setting_outlierTHSumComponent + hitColor.tail<2>().squaredNorm()));
 
+    //================================================
     // average weight with main keyframe weight
-    // #######################################################################
-    // #######################################################################
-    // MIKEK: this main keyframe weight should also be updated
-    // #######################################################################
-    // #######################################################################
-    w = 0.5f*(w + weights[idx]);
+    // TODO: where does these other weights come from?
+    // TODO: perhaps I should change this as well
+    //================================================
+    w = 0.5f * (w + weights[idx]);
 
     // compute huber norm weighting
     float hw = fabsf(residual) < setting_huberTH ?
@@ -256,11 +288,24 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     energyLeft += w*w*hw *residual*residual*(2-hw);
 
     {
-      if(hw < 1) hw = sqrtf(hw);
+      // check if huber-norm weight below 1.0
+      if (hw < 1)
+      {
+        // increase weight (sqrt(a) > a : where 0 < a < 1)
+        hw = sqrtf(hw);
+      }
+
+      // compute final residual weight (huber & image-based)
       hw = hw*w;
 
+      // update image gradient with weight
       hitColor[1]*=hw;
       hitColor[2]*=hw;
+
+      //===============================================================
+      // ASSUME: these commputations are agnostic to light-aware update
+      // NOTE: this is different work per pixel in patch, check it out
+      //===============================================================
 
       J->resF[idx] = residual*hw;
 
@@ -282,15 +327,22 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
       JabJab_01+= drdA*hw*hw;
       JabJab_11+= hw*hw;
 
-
+      //========================================================
+      // update total weight-intensity value for threshold check
+      // TODO: make sure my weight system doesn't muck this up
+      //========================================================
       wJI2_sum += hw*hw*(hitColor[1]*hitColor[1]+hitColor[2]*hitColor[2]);
 
+      // zero-out deriative if brightness-scale disbaled
       if(setting_affineOptModeA < 0) J->JabF[0][idx]=0;
+
+      // zero-out deriative if brightness-bias disbaled
       if(setting_affineOptModeB < 0) J->JabF[1][idx]=0;
-
     }
-  }
 
+  } // end of processing each pixel in patch
+
+  // compose pre-computed Jacobian-based matrices
   J->JIdx2(0,0) = JIdxJIdx_00;
   J->JIdx2(0,1) = JIdxJIdx_10;
   J->JIdx2(1,0) = JIdxJIdx_10;
@@ -304,19 +356,31 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
   J->Jab2(1,0) = JabJab_01;
   J->Jab2(1,1) = JabJab_11;
 
+  // store residual value before outlier removal
   state_NewEnergyWithOutlier = energyLeft;
 
-  if(energyLeft > std::max<float>(host->frameEnergyTH, target->frameEnergyTH) || wJI2_sum < 2)
+  // check if new cost is larger than either frame's threshold
+  // or if the total weight applied to the residual is below a fixed threshold
+  if(energyLeft > std::max<float>(host->frameEnergyTH, target->frameEnergyTH) ||
+    wJI2_sum < 2)
   {
+    // set enerage to max of host and target frames energy threshold
+    // NOTE: these are computed as some scale of the previous tracking error
     energyLeft = std::max<float>(host->frameEnergyTH, target->frameEnergyTH);
+
+    // set residual state to "outlier"
     state_NewState = ResState::OUTLIER;
   }
   else
   {
+    // set residual state to "inlier"
     state_NewState = ResState::IN;
   }
 
+  // record new total cost for keypoint patch
   state_NewEnergy = energyLeft;
+
+  // return new total cost for keypoint patch
   return energyLeft;
 }
 

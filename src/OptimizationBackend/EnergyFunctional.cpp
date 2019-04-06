@@ -357,7 +357,7 @@ double EnergyFunctional::calcMEnergyF()
   // get tightly packed parameter vector
   VecX delta = getStitchedDeltaF();
 
-  // not sure why the dot-product
+  // compute squared-sum of (Ax - b)
   return delta.dot(2*bM + HM*delta);
 }
 

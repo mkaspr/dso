@@ -53,33 +53,58 @@ void FullSystem::linearizeAll_Reductor(bool fixLinearization,
     std::vector<PointFrameResidual*>* toRemove, int min, int max, Vec10* stats,
     int tid)
 {
+  // process specified range of active residuals
   for(int k=min;k<max;k++)
   {
+    // get residual at current index
     PointFrameResidual* r = activeResiduals[k];
+
+    // linearize this residual
     (*stats)[0] += r->linearize(&Hcalib);
 
+    // check if fixed linearization is requested
     if(fixLinearization)
     {
+      // copy residual new state to current state
+      // copy jacobian new state to current state
       r->applyRes(true);
 
+      // check if residual is still active
       if(r->efResidual->isActive())
       {
+        // check if brand new residual
         if(r->isNew)
         {
+          // get reference to parent keypoint
           PointHessian* p = r->point;
-          Vec3f ptp_inf = r->host->targetPrecalc[r->target->idx].PRE_KRKiTll * Vec3f(p->u,p->v, 1);	// projected point assuming infinite depth.
-          Vec3f ptp = ptp_inf + r->host->targetPrecalc[r->target->idx].PRE_KtTll*p->idepth_scaled;	// projected point with real depth.
-          float relBS = 0.01*((ptp_inf.head<2>() / ptp_inf[2])-(ptp.head<2>() / ptp[2])).norm();	// 0.01 = one pixel.
 
+          // projected point assuming infinite depth.
+          Vec3f ptp_inf = r->host->targetPrecalc[r->target->idx].PRE_KRKiTll *
+              Vec3f(p->u,p->v, 1);
 
+          // projected point with real depth.
+          Vec3f ptp = ptp_inf + r->host->targetPrecalc[r->target->idx].
+              PRE_KtTll*p->idepth_scaled;
+
+          // compute relative baseline
+          float relBS = 0.01*((ptp_inf.head<2>() / ptp_inf[2])-(ptp.head<2>() /
+              ptp[2])).norm();
+
+          // check if new max baseline found
           if(relBS > p->maxRelBaseline)
+          {
+            // update new max baseline
             p->maxRelBaseline = relBS;
+          }
 
+          // increment good residual count
           p->numGoodResiduals++;
         }
       }
+      // else, residual no longer active
       else
       {
+        // add it for removal
         toRemove[tid].push_back(activeResiduals[k]);
       }
     }
@@ -163,52 +188,87 @@ Vec3 FullSystem::linearizeAll(bool fixLinearization)
   setNewFrameEnergyTH();
 
 
-  if(fixLinearization)
+  // check if fixed linearization required
+  if (fixLinearization)
   {
-
+    // process each residual in active set of keypoint residuals
     for(PointFrameResidual* r : activeResiduals)
     {
+      // get parent keypoint of residual
       PointHessian* ph = r->point;
-      if(ph->lastResiduals[0].first == r)
+
+      // if current residual is first in list of keypoint residuals
+      // NOTE: index 0 is the latest frame
+      if (ph->lastResiduals[0].first == r)
+      {
+        // update residual-state pair's state
         ph->lastResiduals[0].second = r->state_state;
-      else if(ph->lastResiduals[1].first == r)
+      }
+      // else if current residual is second in list of keypoint residuals
+      // NOTE: index 1 is the previous frame
+      else if (ph->lastResiduals[1].first == r)
+      {
+        // update residual-state pair's state
         ph->lastResiduals[1].second = r->state_state;
-
-
-
+      }
     }
 
     int nResRemoved=0;
-    for(int i=0;i<NUM_THREADS;i++)
+
+    // run one iteration per thread
+    // ASSUME: distributing information to each thread
+    for (int i=0;i<NUM_THREADS;i++)
     {
+      // process list of residuals to remove
+      // NOTE: it would seem that each thread i has its own toRemove buffer
       for(PointFrameResidual* r : toRemove[i])
       {
+        // get parent keypoint of residual
         PointHessian* ph = r->point;
 
+        // if current residual is first in list of keypoint residuals
+        // NOTE: index 0 is the latest frame
         if(ph->lastResiduals[0].first == r)
-          ph->lastResiduals[0].first=0;
-        else if(ph->lastResiduals[1].first == r)
-          ph->lastResiduals[1].first=0;
-
-        for(unsigned int k=0; k<ph->residuals.size();k++)
         {
+          // overwrite with null-pointer
+          ph->lastResiduals[0].first=0;
+        }
+        // else if current residual is second in list of keypoint residuals
+        // NOTE: index 1 is the previous frame
+        else if(ph->lastResiduals[1].first == r)
+        {
+          // overwrite with null-pointer
+          ph->lastResiduals[1].first=0;
+        }
+
+        // process each residual belonging to current keypoint
+        for(unsigned int k=0; k< ph->residuals.size(); k++)
+        {
+          // if current residual (the one being removed) is found
           if(ph->residuals[k] == r)
           {
+            // remove residual from cost function
             ef->dropResidual(r->efResidual);
-            deleteOut<PointFrameResidual>(ph->residuals,k);
+
+            // remove residual from some other state
+            deleteOut<PointFrameResidual>(ph->residuals, k);
+
+            // increment removed residual count
             nResRemoved++;
             break;
           }
         }
       }
     }
-  }
+
+  } // end of fixLinearization work
 
   return Vec3(lastEnergyP, lastEnergyR, num);
 }
 
 // applies step to linearization point.
-bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,float stepfacA,float stepfacD)
+bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,
+    float stepfacR,float stepfacA,float stepfacD)
 {
 //	float meanStepC=0,meanStepP=0,meanStepD=0;
 //	meanStepC += Hcalib.step.norm();
@@ -409,15 +469,21 @@ float FullSystem::optimize(int mnumOptIts)
   // if number of frames too small, skip
   if(frameHessians.size() < 2) return 0;
 
-  // if number of frames small, do more iterations
+  // if number of frames is small, do more iterations
   if(frameHessians.size() < 3) mnumOptIts = 20;
   if(frameHessians.size() < 4) mnumOptIts = 15;
 
   // clear list of residuals objects
+  // we'll be re-populating them shortly
   activeResiduals.clear();
 
+  // reset valid keypoint count
   int numPoints = 0;
+
+  // reset linearized residual count
   int numLRes = 0;
+
+  // add keypoint residuals to activeResiduals vector
 
   // process each keyframe in window
   for(FrameHessian* fh : frameHessians)
@@ -431,9 +497,10 @@ float FullSystem::optimize(int mnumOptIts)
         // check if keypoint not marginalized
         if(!r->efResidual->isLinearized)
         {
-          // add residual as normal
+          // add residual to active set as normal
           activeResiduals.push_back(r);
-          // reset residual status
+
+          // reset residual status (not out-of-bounds)
           r->resetOOB();
         }
         else
@@ -444,7 +511,6 @@ float FullSystem::optimize(int mnumOptIts)
       }
 
       // increment points used
-      // NOTE: probably better as numPoints += pointHessians.size()
       numPoints++;
     }
   }
@@ -456,16 +522,22 @@ float FullSystem::optimize(int mnumOptIts)
         ef->nPoints,(int)activeResiduals.size(), numLRes);
   }
 
+  // linearize all residuals (do not fix linearization)
   // ASSUME: this is recomputing new derivatives
   // that way the following two functions can just do Ax - b
   // to get the current error, without approximating anything
   // these Jacobians/Hessian can also be used later
+  // TODO: what is "fixLinearization" parameter do
   Vec3 lastEnergy = linearizeAll(false);
 
-  // ASSUME: this is the photometric error data term
+  // ASSUME: this is computing the additional linearized cost
+  // that which is produced from marginalization
+  // looks like precomputed derivatives are being used
   double lastEnergyL = calcLEnergy();
 
-  // ASSUME: this is the regularization cost on brightness change
+  // ASSUME: this is computing the normally modeled cost
+  // that which is not marginalized and is fully modeled
+  // looks like precomputed derivatives are being used
   double lastEnergyM = calcMEnergy();
 
   // check if multi-threading
@@ -502,21 +574,23 @@ float FullSystem::optimize(int mnumOptIts)
   float stepsize=1;
 
   // initialize previous parameter update vector
+  // populate entire vector with NaNs to denote no previous value
   VecX previousX = VecX::Constant(CPARS+ 8*frameHessians.size(), NAN);
 
   // for each optimization iteration
-  for(int iteration=0;iteration<mnumOptIts;iteration++)
+  for(int iteration=0; iteration < mnumOptIts; iteration++)
   {
     // backup optimization state
     // ASSUME: this if for if a bad step is taken and we want to revert
     backupState(iteration!=0);
 
     // perform LM step
-    // TODO: follow this function
+    // ASSUME: this is just solving the Ax = b problem
+    // done in a problem agnostic manner, so no photometric error here
     solveSystem(iteration, lambda);
 
     // get relative update direction change
-    // ASSUME: this is for exiting if little change?
+    // this for determining the new optimization step size
     double incDirChange = (1e-20 + previousX.dot(ef->lastX)) /
         (1e-20 + previousX.norm() * ef->lastX.norm());
 
@@ -539,15 +613,31 @@ float FullSystem::optimize(int mnumOptIts)
 
     // TODO: review ========================
 
+    // determine if we can break early from the optimization
+    // TODO: determine what is actually being evaluated here
+    // ASSUME: its computing change in parameters given step
     bool canbreak =
         doStepFromBackup(stepsize,stepsize,stepsize,stepsize,stepsize);
 
-    // eval new energy!
-    // TODO: follow this function
+    // linearize all residuals (do not fix linearization)
+    // this is being computed as per the new parameters
+    // ASSUME: this is recomputing new derivatives
+    // that way the following two functions can just do Ax - b
+    // to get the current error, without approximating anything
+    // these Jacobians/Hessian can also be used later
+    // TODO: what is "fixLinearization" parameter do
     Vec3 newEnergy = linearizeAll(false);
-    // TODO: follow this function
+
+    // compute updated cost given new parameters
+    // ASSUME: this is computing the additional linearized cost
+    // that which is produced from marginalization
+    // looks like precomputed derivatives are being used
     double newEnergyL = calcLEnergy();
-    // TODO: follow this function
+
+    // compute updated cost given new parameters
+    // ASSUME: this is computing the normally modeled cost
+    // that which is not marginalized and is fully modeled
+    // looks like precomputed derivatives are being used
     double newEnergyM = calcMEnergy();
 
     // print debug message as needed
@@ -595,7 +685,7 @@ float FullSystem::optimize(int mnumOptIts)
       lastEnergyL = newEnergyL;
       lastEnergyM = newEnergyM;
 
-      // be more like GN
+      // good step, so be more like GN
       lambda *= 0.25;
     }
     // step rejected
@@ -604,42 +694,64 @@ float FullSystem::optimize(int mnumOptIts)
       // restore previous step state
       loadSateBackup();
 
-      // restore costs
-      // NOTE: why isn't this appart of backup state?
+      // restore costs from previous step
       lastEnergy = linearizeAll(false);
       lastEnergyL = calcLEnergy();
       lastEnergyM = calcMEnergy();
 
-      // be more like gradient descent
+      // bad step, so be more like gradient descent
       lambda *= 1e2;
     }
 
-    // if can exit optimization early, do so
+    // if can exit optimization early, do so now
     if(canbreak && iteration >= setting_minOptIterations) break;
-  }
 
+  } // end of optimization for-loop
+
+  // TODO: review this variables purpose
   Vec10 newStateZero = Vec10::Zero();
 
+  // TODO: review this variables purpose
   newStateZero.segment<2>(6) = frameHessians.back()->get_state().segment<2>(6);
 
+  // TODO: review this variables purpose
   frameHessians.back()->setEvalPT(frameHessians.back()->PRE_worldToCam,
       newStateZero);
 
+  // TODO: review this variables purpose
   EFDeltaValid=false;
+
+  // TODO: review this variables purpose
   EFAdjointsValid=false;
+
+  // TODO: review this function
   ef->setAdjointsF(&Hcalib);
+
+  // TODO: review this function
   setPrecalcValues();
 
+  // linearize all residuals (do not fix linearization)
+  // this is being computed as per the new parameters
+  // ASSUME: this is recomputing new derivatives
+  // that way the following two functions can just do Ax - b
+  // to get the current error, without approximating anything
+  // these Jacobians/Hessian can also be used later
+  // NOTE: we are fixing linearization on this one
+  // this means the detected outliers flagged for removal will be processed
   lastEnergy = linearizeAll(true);
 
+  // check if no sucess steps where taken
+  // or if we are now in an invalid state after optimization
   if(!std::isfinite((double)lastEnergy[0]) ||
       !std::isfinite((double)lastEnergy[1]) ||
       !std::isfinite((double)lastEnergy[2]))
   {
+    // change tracking status to "lost"
     printf("KF Tracking failed: LOST!\n");
     isLost=true;
   }
 
+  // compute and store RMSE for window optimization
   statistics_lastFineTrackRMSE = sqrtf((float)(lastEnergy[0] /
       (patternNum*ef->resInA)));
 
@@ -653,6 +765,7 @@ float FullSystem::optimize(int mnumOptIts)
     calibLog->flush();
   }
 
+  // actually update the external keyframe window state
   {
     // acquire frame lock as we'll be updating keyframe poses
     boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
@@ -660,8 +773,10 @@ float FullSystem::optimize(int mnumOptIts)
     // for each active keyframe in window
     for(FrameHessian* fh : frameHessians)
     {
-      // apply SE3 and brightness updates
+      // apply SE3 transform update
       fh->shell->camToWorld = fh->PRE_camToWorld;
+
+      // apply affine brightness update
       fh->shell->aff_g2l = fh->aff_g2l();
     }
   }
@@ -669,7 +784,8 @@ float FullSystem::optimize(int mnumOptIts)
   // debug plot as needed
   debugPlotTracking();
 
-  // return RMSE for window
+  // return RMSE for window optimization
+  // NOTE: this is the same as statistics_lastFineTrackRMSE
   return sqrtf((float)(lastEnergy[0] / (patternNum*ef->resInA)));
 }
 
