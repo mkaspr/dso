@@ -137,9 +137,14 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     // get center-point and depth of keypoint in new reference frame
     centerProjectedTo = Vec3f(Ku, Kv, new_idepth);
 
-    //=======================================
-    // compute derivatives for keypoint depth
-    //=======================================
+    //===========================================================
+    // NOTE: these are all derivs for change in uv given params
+    // however, I'll need to compute change in depth givie params
+    // then actually use these values later during optimization
+    //===========================================================
+
+    // compute derivatives for change in uv as per keypoint depth
+    // NOTE: light-aware has no change on camera geometry
 
     d_d_x = drescale * (PRE_tTll_0[0]-PRE_tTll_0[2]*u)*
         SCALE_IDEPTH*HCalib->fxl();
@@ -147,9 +152,9 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     d_d_y = drescale * (PRE_tTll_0[1]-PRE_tTll_0[2]*v)*
         SCALE_IDEPTH*HCalib->fyl();
 
-    //=======================================
-    // derivatives for the camera calibration
-    //=======================================
+    // derivatives for the change in uv as per camera calibration
+    // NOTE: light-aware has no change on camera geometry
+    // NOTE: I believe the camera parameters are global for window
 
     d_C_x[2] = drescale*(PRE_RTll_0(2,0)*u-PRE_RTll_0(0,0));
 
@@ -176,9 +181,10 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
     d_C_y[2] *= SCALE_C;
     d_C_y[3] = (d_C_y[3]+1)*SCALE_C;
 
-    //========================================
-    // compute derivatives for the camera pose
-    //========================================
+    // compute derivatives for the change in uv as per camera pose
+    // NOTE: light-aware has no change on camera geometry
+    // NOTE: it would seem we are only considerinng one transform for this error
+    // does that mean only the pose of the latest keyframes is optimized?
 
     d_xi_x[0] = new_idepth*HCalib->fxl();
     d_xi_x[1] = 0;
@@ -245,12 +251,16 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 
     //=======================================================================
     // finally, compute photometric error (TODO: update with light-aware cost)
+    // NOTE: weight still needs to be applied (so update derivs accordingly)
+    // NOTE: hitColor is currently only changed by uv-coords
+    // however, in light-aware, it is also change by relative depth
+    // ASSUME: color[idx] has already been converted to "global" brightness
     //=======================================================================
     float residual = hitColor[0] - (float)(affLL[0] * color[idx] + affLL[1]);
 
     //========================================================================
     // compute partial-derivative of photometric error w.r.t. affine-scale (a)
-    // TODO: what about affine-bias (b)?
+    // TODO: should this be a negative value? what is b0?
     //========================================================================
     float drdA = (color[idx]-b0);
 
@@ -302,17 +312,42 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
       hitColor[1]*=hw;
       hitColor[2]*=hw;
 
-      //===============================================================
-      // ASSUME: these commputations are agnostic to light-aware update
-      // NOTE: this is different work per pixel in patch, check it out
-      //===============================================================
 
+      //===================================================
+      // missing derivatives for J_cost_depth (light-aware)
+      // I need to add new RawResdiaulJacobian members
+      // and populate them accordingly here
+      // then, when solving I'll need to use them too
+      //===================================================
+
+      // compute the weight-residual for current pixel in patch
       J->resF[idx] = residual*hw;
 
+      // compute change is cost as per change in u-coord
       J->JIdx[0][idx] = hitColor[1];
+
+      // compute change is cost as per change in v-coord
       J->JIdx[1][idx] = hitColor[2];
+
+      // NOTE: it would seems that only one the affine brightness is considered
+      // does that mean that only last keyframe's brightness is optimized?
+
+      // compute change in cost as per change in brightness-scale
       J->JabF[0][idx] = drdA*hw;
+
+      // compute change in cost as per change in brightness-bias
       J->JabF[1][idx] = hw;
+
+
+      // update select cells of the hessian
+      // ASSUME: nothing needs to be updated here
+
+      //===============================================
+      // missing hessian for J_cost_depth (light-aware)
+      // I need to add new RawResdiaulJacobian members
+      // and populate the hessian accordingly here
+      // then, when solving I'll need to use them too
+      //===============================================
 
       JIdxJIdx_00+=hitColor[1]*hitColor[1];
       JIdxJIdx_11+=hitColor[2]*hitColor[2];

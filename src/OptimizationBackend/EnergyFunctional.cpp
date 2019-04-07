@@ -292,56 +292,110 @@ void EnergyFunctional::accumulateSCF_MT(MatXX &H, VecX &b, bool MT)
 
 void EnergyFunctional::resubstituteF_MT(VecX x, CalibHessian* HCalib, bool MT)
 {
+  // assert valid parameter count
   assert(x.size() == CPARS+nFrames*8);
 
+  // cast parameter delta vector float vector
   VecXf xF = x.cast<float>();
-  HCalib->step = - x.head<CPARS>();
 
+  // record camera parameter delta
+  HCalib->step = -x.head<CPARS>();
+
+  // allocate temporary buffer for frame-frame data
+  // TODO: what is being stored here? why 8 values per entry?
+  // ASSUME: this could be some sort of relative alignment cache
   Mat18f* xAd = new Mat18f[nFrames*nFrames];
+
+  // get negative float camera parameter delta
   VecCf cstep = xF.head<CPARS>();
+
+  // process each host keyframe in window
   for(EFFrame* h : frames)
   {
-    h->data->step.head<8>() = - x.segment<8>(CPARS+8*h->idx);
+    // update host frame's camera parameters
+    h->data->step.head<8>() = -x.segment<8>(CPARS+8*h->idx);
+
+    // zero out host frame's brightness parameters
     h->data->step.tail<2>().setZero();
 
+    // process each target frame
     for(EFFrame* t : frames)
-      xAd[nFrames*h->idx + t->idx] = xF.segment<8>(CPARS+8*h->idx).transpose() *   adHostF[h->idx+nFrames*t->idx]
-                  + xF.segment<8>(CPARS+8*t->idx).transpose() * adTargetF[h->idx+nFrames*t->idx];
+    {
+      // TODO: determine what's going on here
+      xAd[nFrames*h->idx + t->idx] = xF.segment<8>(CPARS+8*h->idx).transpose() *
+          adHostF[h->idx+nFrames*t->idx] +
+          xF.segment<8>(CPARS+8*t->idx).transpose() *
+          adTargetF[h->idx+nFrames*t->idx];
+    }
   }
 
-  if(MT)
+  // check if multi-threaded
+  if (MT)
+  {
     red->reduce(boost::bind(&EnergyFunctional::resubstituteFPt,
             this, cstep, xAd,  _1, _2, _3, _4), 0, allPoints.size(), 50);
+  }
+  // not multi-threaded
   else
+  {
+    // update
     resubstituteFPt(cstep, xAd, 0, allPoints.size(), 0,0);
+  }
 
+  // delete temporary buffer
   delete[] xAd;
 }
 
 void EnergyFunctional::resubstituteFPt(
         const VecCf &xc, Mat18f* xAd, int min, int max, Vec10* stats, int tid)
 {
+  // process the specified range of keypoints
   for(int k=min;k<max;k++)
   {
+    // get current keypoint
     EFPoint* p = allPoints[k];
 
+    // initialize valid residual count
     int ngoodres = 0;
-    for(EFResidual* r : p->residualsAll) if(r->isActive()) ngoodres++;
+
+    // process each keypoint residual
+    for(EFResidual* r : p->residualsAll)
+    {
+      // increment valid residual count
+      if(r->isActive()) ngoodres++;
+    }
+
+    // check if has not valid residuals
     if(ngoodres==0)
     {
+      // store out point update
+      // ASSUME: ingore wild null-space updates
       p->data->step = 0;
       continue;
     }
+
+    // get current gradiente
     float b = p->bdSumF;
+
+    // modified gradient
+    // TODO: are they using some sort of adjoint state method?
     b -= xc.dot(p->Hcd_accAF + p->Hcd_accLF);
 
+    // process each keypoint residual
     for(EFResidual* r : p->residualsAll)
     {
+      // skip inactive residuals
       if(!r->isActive()) continue;
+
+      // modified gradient
+      // TODO: are they using some sort of adjoint state method?
       b -= xAd[r->hostIDX*nFrames + r->targetIDX] * r->JpJdF;
     }
 
-    p->data->step = - b*p->HdiF;
+    // modified parameter update
+    p->data->step = -b*p->HdiF;
+
+    // assert new update is valid
     assert(std::isfinite(p->data->step));
   }
 }
@@ -362,9 +416,9 @@ double EnergyFunctional::calcMEnergyF()
 }
 
 
-// NOTE: should not need to update this function as it is using the
-// previously computed Jacobians, linearized at the current parameter state
-// so this code is agnostic to the objective function at hand
+//==========================================================================
+// MIKEK: this needs to be updated to use my new light-aware Jacobian blocks
+//==========================================================================
 void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
 {
   // initialize accumlator
@@ -430,6 +484,7 @@ void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
     }
     E.updateSingle(p->deltaF*p->deltaF*p->priorF);
   }
+
   E.finish();
   (*stats)[0] += E.A;
 }
@@ -450,12 +505,11 @@ double EnergyFunctional::calcLEnergyF_MT()
   // process each keyframe in window
   for(EFFrame* f : frames)
   {
-    // NOTE: not sure what this is
-    // but I assume it has more to do with the optimization strategy
-    // and not so much with the objective function itself
+    // add regularization term for current frame's change in brightness
     E += f->delta_prior.cwiseProduct(f->prior).dot(f->delta_prior);
   }
 
+  // add regularization term for change in camera parameters
   E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
 
   // add the photometric error for each keypoint patch
@@ -549,6 +603,10 @@ void EnergyFunctional::dropResidual(EFResidual* r)
   r->data->efResidual=0;
   delete r;
 }
+
+//==========================================================================
+// MIKEK: this needs to be updated to use my new light-aware Jacobian blocks
+//==========================================================================
 void EnergyFunctional::marginalizeFrame(EFFrame* fh)
 {
 
@@ -885,7 +943,7 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda,
       HFinal_top(i,i) *= (1+lambda);
     }
   }
-  // otherwise orhogonalization not requested
+  // otherwise orthogonalization not requested
   else
   {
     // compute hessian and gradient
@@ -937,8 +995,8 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda,
 
       else Ub[i] /= S[i];
     }
-    x = SVecI.asDiagonal() * svd.matrixV() * Ub;
 
+    x = SVecI.asDiagonal() * svd.matrixV() * Ub;
   }
   // otherwise we're not using SVD to solve problem
   // we're using Eigen's LDLT decomposition

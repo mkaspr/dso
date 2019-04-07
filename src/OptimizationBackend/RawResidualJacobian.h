@@ -1,6 +1,6 @@
 /**
 * This file is part of DSO.
-* 
+*
 * Copyright 2016 Technical University of Munich and Intel.
 * Developed by Jakob Engel <engelj at in dot tum dot de>,
 * for more information see <http://vision.in.tum.de/dso>.
@@ -24,39 +24,47 @@
 
 #pragma once
 
- 
+
 #include "util/NumType.h"
 
 namespace dso
 {
+
+//====================================================================
+// MIKEK: update his class to hold reference-depth related derivatives
+//====================================================================
+
+// NOTE: it would appear that only one frame's parameters are considered here
+// otherise, say, d[x,y]/d[xi] would be 2x12 and not 2x6
+
 struct RawResidualJacobian
 {
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-	// ================== new structure: save independently =============.
-	VecNRf resF;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+  // ================== new structure: save independently =============.
+  VecNRf resF;
 
-	// the two rows of d[x,y]/d[xi].
-	Vec6f Jpdxi[2];			// 2x6
+  // the two rows of d[x,y]/d[xi].
+  Vec6f Jpdxi[2];			// 2x6 (TODO: change to 3x6)
 
-	// the two rows of d[x,y]/d[C].
-	VecCf Jpdc[2];			// 2x4
+  // the two rows of d[x,y]/d[C].
+  VecCf Jpdc[2];			// 2x4 (TODO: change to 3x4)
 
-	// the two rows of d[x,y]/d[idepth].
-	Vec2f Jpdd;				// 2x1
+  // the two rows of d[x,y]/d[idepth].
+  Vec2f Jpdd;				// 2x1 (TODO: change to 3x1)
 
-	// the two columns of d[r]/d[x,y].
-	VecNRf JIdx[2];			// 9x2
+  // the two columns of d[r]/d[x,y].
+  VecNRf JIdx[2];			// 8x2 (one residual per pixel in path)
 
-	// = the two columns of d[r] / d[ab]
-	VecNRf JabF[2];			// 9x2
+  // = the two columns of d[r] / d[ab]
+  VecNRf JabF[2];			// 8x2 (one residual per pixel in path)
 
 
-	// = JIdx^T * JIdx (inner product). Only as a shorthand.
-	Mat22f JIdx2;				// 2x2
-	// = Jab^T * JIdx (inner product). Only as a shorthand.
-	Mat22f JabJIdx;			// 2x2
-	// = Jab^T * Jab (inner product). Only as a shorthand.
-	Mat22f Jab2;			// 2x2
+  // = JIdx^T * JIdx (inner product). Only as a shorthand.
+  Mat22f JIdx2;				// 2x2
+  // = Jab^T * JIdx (inner product). Only as a shorthand.
+  Mat22f JabJIdx;			// 2x2
+  // = Jab^T * Jab (inner product). Only as a shorthand.
+  Mat22f Jab2;			// 2x2
 
 };
 }

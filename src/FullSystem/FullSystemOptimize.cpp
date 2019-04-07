@@ -530,14 +530,16 @@ float FullSystem::optimize(int mnumOptIts)
   // TODO: what is "fixLinearization" parameter do
   Vec3 lastEnergy = linearizeAll(false);
 
-  // ASSUME: this is computing the additional linearized cost
-  // that which is produced from marginalization
-  // looks like precomputed derivatives are being used
+  // compute the linearized cost (full model, linearized at some point)
+  // NOTE: this computes the full hessian pre-calculated blocks
+  // so I need to update it to use my new light-aware blocks
   double lastEnergyL = calcLEnergy();
 
-  // ASSUME: this is computing the normally modeled cost
-  // that which is not marginalized and is fully modeled
-  // looks like precomputed derivatives are being used
+  // compute the marginalized cost
+  // NOTE: this uses a precomputed hessian and gradient
+  // so this function does not need to change
+  // however, how the hessian and gradient is compute does need to change
+  // TODO: find out where and how it is currently being computed
   double lastEnergyM = calcMEnergy();
 
   // check if multi-threading
@@ -628,16 +630,16 @@ float FullSystem::optimize(int mnumOptIts)
     // TODO: what is "fixLinearization" parameter do
     Vec3 newEnergy = linearizeAll(false);
 
-    // compute updated cost given new parameters
-    // ASSUME: this is computing the additional linearized cost
-    // that which is produced from marginalization
-    // looks like precomputed derivatives are being used
+    // compute the new linearized cost (full model, linearized at some point)
+    // NOTE: this computes the full hessian pre-calculated blocks
+    // so I need to update it to use my new light-aware blocks
     double newEnergyL = calcLEnergy();
 
-    // compute updated cost given new parameters
-    // ASSUME: this is computing the normally modeled cost
-    // that which is not marginalized and is fully modeled
-    // looks like precomputed derivatives are being used
+    // compute updated marginalized cost given new parameters
+    // NOTE: this uses a precomputed hessian and gradient
+    // so this function does not need to change
+    // however, how the hessian and gradient is compute does need to change
+    // TODO: find out where and how it is currently being computed
     double newEnergyM = calcMEnergy();
 
     // print debug message as needed
