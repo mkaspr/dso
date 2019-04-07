@@ -54,15 +54,17 @@ struct RawResidualJacobian
 
   // the two columns of d[r]/d[x,y].
   VecNRf JIdx[2];			// 8x2 (one residual per pixel in path)
+  // TODO: change to 8x3 (d[r]/d[x, y, dj])
 
   // = the two columns of d[r] / d[ab]
   VecNRf JabF[2];			// 8x2 (one residual per pixel in path)
 
-
   // = JIdx^T * JIdx (inner product). Only as a shorthand.
-  Mat22f JIdx2;				// 2x2
+  Mat22f JIdx2;				// 2x2 (TODO: change to 3x3)
+
   // = Jab^T * JIdx (inner product). Only as a shorthand.
-  Mat22f JabJIdx;			// 2x2
+  Mat22f JabJIdx;			// 2x2 (TODO: change to 2x3)
+
   // = Jab^T * Jab (inner product). Only as a shorthand.
   Mat22f Jab2;			// 2x2
 
