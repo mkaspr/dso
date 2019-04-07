@@ -190,7 +190,8 @@ struct FrameHessian
     PRE_worldToCam = SE3::exp(w2c_leftEps()) * get_worldToCam_evalPT();
     PRE_camToWorld = PRE_worldToCam.inverse();
     //setCurrentNullspace();
-  };
+  }
+
   inline void setStateScaled(const Vec10 &state_scaled)
   {
 
@@ -205,16 +206,15 @@ struct FrameHessian
     PRE_worldToCam = SE3::exp(w2c_leftEps()) * get_worldToCam_evalPT();
     PRE_camToWorld = PRE_worldToCam.inverse();
     //setCurrentNullspace();
-  };
+  }
+
   inline void setEvalPT(const SE3 &worldToCam_evalPT, const Vec10 &state)
   {
 
     this->worldToCam_evalPT = worldToCam_evalPT;
     setState(state);
     setStateZero(state);
-  };
-
-
+  }
 
   inline void setEvalPT_scaled(const SE3 &worldToCam_evalPT, const AffLight &aff_g2l)
   {
@@ -224,7 +224,7 @@ struct FrameHessian
     this->worldToCam_evalPT = worldToCam_evalPT;
     setStateScaled(initial_state);
     setStateZero(this->get_state());
-  };
+  }
 
   void release();
 
